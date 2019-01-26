@@ -8,14 +8,5 @@
     "outDir": "dist",
     "sourceMap": true
   },
-  "include": [
-    "index.ts",
-    "lib/**/*.ts",
-    "tests/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "tmp"
-  ]
+  "files": ["index.ts", "tests/index"]
 }

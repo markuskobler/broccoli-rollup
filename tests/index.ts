@@ -129,9 +129,12 @@ export default index;
         await output.build();
       } catch (e) {
         errorWasThrown = true;
-        assert.ok(e.message.startsWith('Could not load'));
+        assert.ok(
+          /Could not.*minus\.js/.test(e.message),
+          `expected error about minus.js missing but got ${e.message}`,
+        );
       }
-      assert.ok(errorWasThrown);
+      assert.ok(errorWasThrown, 'error was thrown');
 
       input.write({
         'index.js': 'import add from "./add"; export default add(1);',
@@ -225,7 +228,6 @@ export default index;
       try {
         await output.build();
 
-        // var add = x => x + x;\n\nconst two = add(1);\n\nexport default two;\n//# sourceMappingURL=out.js.map
         assert.deepEqual(output.read(), {
           dist: {
             'out.js': `var add = x => x + x;
@@ -233,7 +235,8 @@ export default index;
 const two = add(1);
 
 export default two;
-//# sourceMappingURL=out.js.map`,
+//# sourceMappingURL=out.js.map
+`,
             'out.js.map':
               '{"version":3,"file":"out.js","sources":["../add.js","../index.js"],"sourcesContent":["export default x => x + x;","import add from \\"./add\\"; const two = add(1); export default two;"],"names":[],"mappings":"AAAA,UAAe,CAAC,IAAI,CAAC,GAAG,CAAC;;qBAAC,rBCAD,MAAM,GAAG,GAAG,GAAG,CAAC,CAAC,CAAC,CAAC;;;;"}',
             'out.umd.js':
@@ -273,7 +276,7 @@ export default two;
         const input = use(await createTempDir());
         const subject = new Rollup(input.path(), {
           rollup: {
-            input: ['a.js', 'b.js'],
+            input: ['a.js', 'b.js', 'f.js'],
             output: {
               dir: 'chunks',
               format: 'es',
@@ -291,6 +294,7 @@ export default two;
           'c.js': 'const num1 = 1; export default num1;',
           'd.js': 'const num2 = 2; export default num2;',
           'e.js': 'const num3 = 3; export default num3;',
+          'f.js': 'export const num4 = 4;',
         });
 
         await output.build();
@@ -302,6 +306,154 @@ export default two;
             'b.js':
               "import { a as e } from './chunk-924c0816.js';\n\nconst num2 = 2;\n\nconst out = num2 + e;\n\nexport { out };\n",
             'chunk-924c0816.js': 'const num3 = 3;\n\nexport { num3 as a };\n',
+            'f.js': 'const num4 = 4;\n\nexport { num4 };\n',
+          },
+        });
+
+        await output.build();
+
+        assert.deepEqual(output.changes(), {}, 'no op build');
+
+        input.write({
+          'd.js':
+            'const num2 = 2; export default num2; export const foo = "bar"',
+        });
+
+        await output.build();
+
+        assert.deepEqual(output.changes(), {}, 'no changes from unused export');
+
+        input.write({
+          'foo.css': 'unrelated file',
+        });
+
+        await output.build();
+
+        assert.deepEqual(
+          output.changes(),
+          {},
+          'no changes from unrelated input',
+        );
+
+        input.write({
+          'f.js': 'export { foo } from "./other"',
+        });
+
+        try {
+          await output.build();
+        } catch (e) {
+          assert.ok(
+            /Could not.*other/.test(e.message),
+            `expected error about other missing but got ${e.message}`,
+          );
+        }
+
+        input.write({
+          'other.js': '',
+        });
+
+        try {
+          await output.build();
+        } catch (e) {
+          assert.ok(
+            /foo.*not exported.*other/.test(e.message),
+            `expected error about foo not exported from other but got ${
+              e.message
+            }`,
+          );
+        }
+
+        // our output should still be the same as before noops and errors
+        assert.deepEqual(output.read(), {
+          chunks: {
+            'a.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num1 = 1;\n\nconst out = num1 + e;\n\nexport { out };\n",
+            'b.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num2 = 2;\n\nconst out = num2 + e;\n\nexport { out };\n",
+            'chunk-924c0816.js': 'const num3 = 3;\n\nexport { num3 as a };\n',
+            'f.js': 'const num4 = 4;\n\nexport { num4 };\n',
+          },
+        });
+
+        input.write({
+          'other.js': 'export function foo() {};',
+        });
+
+        await output.build();
+
+        assert.deepEqual(
+          output.changes(),
+          {
+            'chunks/f.js': 'change',
+          },
+          'only the entry point affected by the change should change',
+        );
+
+        assert.deepEqual(output.read(), {
+          chunks: {
+            'a.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num1 = 1;\n\nconst out = num1 + e;\n\nexport { out };\n",
+            'b.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num2 = 2;\n\nconst out = num2 + e;\n\nexport { out };\n",
+            'chunk-924c0816.js': 'const num3 = 3;\n\nexport { num3 as a };\n',
+            'f.js': 'function foo() {}\n\nexport { foo };\n',
+          },
+        });
+
+        input.write({
+          'other.js': 'export { foo } from "./d";',
+        });
+
+        await output.build();
+
+        assert.deepEqual(
+          output.changes(),
+          {
+            'chunks/b.js': 'change',
+            'chunks/chunk-d5df9f53.js': 'create',
+            'chunks/f.js': 'change',
+          },
+          'only the entry point affected by the change should change',
+        );
+
+        assert.deepEqual(output.read(), {
+          chunks: {
+            'a.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num1 = 1;\n\nconst out = num1 + e;\n\nexport { out };\n",
+            'b.js':
+              "import { a as e } from './chunk-924c0816.js';\nimport { a as d } from './chunk-d5df9f53.js';\n\nconst out = d + e;\n\nexport { out };\n",
+            'chunk-924c0816.js': 'const num3 = 3;\n\nexport { num3 as a };\n',
+            'chunk-d5df9f53.js':
+              'const num2 = 2; const foo = "bar";\n\nexport { num2 as a, foo as b };\n',
+            'f.js': "export { b as foo } from './chunk-d5df9f53.js';\n",
+          },
+        });
+
+        // undo
+        input.write({
+          'other.js': 'export function foo() {};',
+        });
+
+        await output.build();
+
+        assert.deepEqual(
+          output.changes(),
+          {
+            'chunks/b.js': 'change',
+            'chunks/chunk-d5df9f53.js': 'unlink',
+            'chunks/f.js': 'change',
+          },
+          'only the entry point affected by the change should change',
+        );
+
+        assert.deepEqual(output.read(), {
+          chunks: {
+            'a.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num1 = 1;\n\nconst out = num1 + e;\n\nexport { out };\n",
+            'b.js':
+              "import { a as e } from './chunk-924c0816.js';\n\nconst num2 = 2;\n\nconst out = num2 + e;\n\nexport { out };\n",
+            'chunk-924c0816.js': 'const num3 = 3;\n\nexport { num3 as a };\n',
+            'f.js': 'function foo() {}\n\nexport { foo };\n',
           },
         });
       });
