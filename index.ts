@@ -136,19 +136,30 @@ export = class Rollup extends Plugin {
     }
 
     const options = this._loadOptions();
-    options.input = this._mapInput(options.input);
+    if (options.input) {
+      options.input = this._mapInput(options.input);
+    }
 
     const token = heimdall.start('rollup');
 
-    const build = await rollup(options as InputOptions);
+    try {
+      const build = await rollup(options as InputOptions);
 
-    if (this.cache) {
-      this._cache = build.cache;
+      if (this.cache) {
+        this._cache = build.cache;
+      }
+
+      await this._buildTargets(build, options);
+
+      token.stop();
+
+    } catch (err) {
+
+      // TODO: improve error handling
+      console.error(err);
+      
+      throw err;
     }
-
-    await this._buildTargets(build, options);
-
-    token.stop();
   }
 
   private _mapInput(input: InputOption) {
